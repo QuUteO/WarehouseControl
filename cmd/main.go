@@ -2,15 +2,53 @@ package main
 
 import (
 	"WarehouseControl/internal/config"
+	"context"
 	"fmt"
-	"log"
+	"os"
+	"time"
+
+	"github.com/wb-go/wbf/dbpg/pgx-driver"
+	"github.com/wb-go/wbf/logger"
 )
 
 func main() {
 	cfg, err := config.New("./config.yaml")
 	if err != nil {
-		log.Fatal(err)
+		fmt.Fprintf(os.Stderr, "Ошибка загрузки конфигурации: %v\n", err)
+		os.Exit(1)
 	}
 
-	fmt.Println(cfg)
+	log, err := logger.InitLogger(
+		logger.ZapEngine,
+		"WarehouseControl",
+		cfg.Env,
+		logger.WithLevel(logger.InfoLevel),
+		logger.WithRotation("logs/app.log", 100, 5, 30),
+	)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Ошибка инициализации логгера: %v\n", err)
+		os.Exit(1)
+	}
+
+	log.Info("Запуск приложения EventBooker...")
+
+	pg, err := pgxdriver.New(
+		cfg.DSN,
+		log,
+		pgxdriver.MaxPoolSize(50),
+		pgxdriver.MaxConnAttempts(5),
+		pgxdriver.BaseRetryDelay(100*time.Millisecond),
+	)
+	if err != nil {
+		log.Error("Не удалось подключиться к PostgreSQL", "error", err)
+		os.Exit(1)
+	}
+	defer pg.Close()
+
+	ctx := context.Background()
+	if err := pg.Ping(ctx); err != nil {
+		log.Error("PostgreSQL недоступен", "error", err)
+		os.Exit(1)
+	}
+	log.Info("PostgreSQL успешно подключен")
 }
